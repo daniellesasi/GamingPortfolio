@@ -439,13 +439,19 @@ The team is a collective of high-end fashion designers from the luxury industry 
         const firstActiveFrame = document.querySelector('.portfolio-wrapper.active .canvas-frame:not(.draft)');
 
         // Set up every video for safe muted autoplay; default to preload=none for non-first to save bandwidth.
+        // NOTE: we deliberately KEEP the `autoplay` attribute on every video. On mobile (iOS Low Power
+        // Mode / Data Saver in particular) the browser's native muted-autoplay engine is far more
+        // reliable than a scripted .play(); preload=none still prevents eager downloads.
         document.querySelectorAll('.canvas-frame video').forEach(v => {
             v.muted = true;
             v.playsInline = true;
             v.loop = true;
+            v.autoplay = true;
+            v.setAttribute('autoplay', '');
+            v.setAttribute('playsinline', '');
+            v.setAttribute('webkit-playsinline', '');
             const isFirstFrame = firstActiveFrame && firstActiveFrame.contains(v);
             v.preload = isFirstFrame ? 'auto' : 'none';
-            if (!isFirstFrame) v.removeAttribute('autoplay');  // don't fight preload
         });
 
         // Add a spinner element to every frame (CSS keeps content hidden until .ready is added)
@@ -522,15 +528,44 @@ The team is a collective of high-end fashion designers from the luxury industry 
 
         document.querySelectorAll('.project-section').forEach(s => sectionLoader.observe(s));
 
-        // First-tap autoplay unlock fallback (iOS Low Power Mode etc.)
+        // First-interaction autoplay unlock fallback (iOS Low Power Mode / Data Saver etc.)
+        // Any user gesture satisfies the autoplay policy — use it to kick every ready video AND
+        // to force-ready + play the section currently in view, so a single touch anywhere works.
+        const unlockEvents = ['pointerdown', 'click', 'touchstart', 'touchend', 'keydown', 'scroll'];
+        let autoplayUnlocked = false;
         function unlockAutoplay() {
             document.querySelectorAll('.canvas-frame[data-ready="1"] video').forEach(v => {
                 v.muted = true; v.playsInline = true;
                 if (v.paused) v.play().catch(() => {});
             });
-            ['click', 'touchstart', 'touchend'].forEach(ev => document.removeEventListener(ev, unlockAutoplay, true));
+            // Also force the section in view to load + play even if it wasn't ready yet.
+            document.querySelectorAll('.project-section').forEach(s => {
+                const r = s.getBoundingClientRect();
+                if (r.top < window.innerHeight && r.bottom > 0) {
+                    const f = s.querySelector('.canvas-frame:not(.draft)');
+                    if (f) readyFrame(f).then(() => f.querySelectorAll('video').forEach(v => v.play().catch(() => {})));
+                }
+            });
+            if (autoplayUnlocked) return;
+            autoplayUnlocked = true;
+            unlockEvents.forEach(ev => document.removeEventListener(ev, unlockAutoplay, true));
         }
-        ['click', 'touchstart', 'touchend'].forEach(ev => document.addEventListener(ev, unlockAutoplay, true));
+        unlockEvents.forEach(ev => document.addEventListener(ev, unlockAutoplay, true));
+
+        // Resume playback when the tab/app becomes visible again (iOS suspends backgrounded video).
+        function resumeVisibleVideos() {
+            if (document.hidden) return;
+            document.querySelectorAll('.project-section').forEach(s => {
+                const r = s.getBoundingClientRect();
+                if (r.top < window.innerHeight && r.bottom > 0) {
+                    s.querySelectorAll('.canvas-frame[data-ready="1"] video').forEach(v => {
+                        if (v.paused) v.play().catch(() => {});
+                    });
+                }
+            });
+        }
+        document.addEventListener('visibilitychange', resumeVisibleVideos);
+        window.addEventListener('pageshow', resumeVisibleVideos);
 
         const scrollHint = document.getElementById('scroll-hint');
         let scrollHintTimer = null;
