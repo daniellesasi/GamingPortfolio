@@ -67,7 +67,7 @@
         .canvas-frame.bg-white .frame-loader::after { border-color: rgba(0,0,0,0.15); border-top-color: rgba(0,0,0,0.65); }
         @keyframes fl-spin { to { transform: rotate(360deg); } }
         /* design canvas: 1920x1080 internal layout, absolutely centered, scaled */
-        .canvas-inner { position: absolute; top: 50%; left: 50%; width: 1920px; height: 1080px; transform: translate(-50%, -50%) scale(var(--canvas-scale, 1)); transform-origin: center center; }
+        .canvas-inner { position: absolute; top: 50%; left: 50%; width: 1920px; height: 1080px; transform: translate(-50%, -50%) scale(var(--canvas-scale, 1)); transform-origin: center center; overflow: hidden; }
         .canvas-frame img, .canvas-frame video { position: absolute; object-fit: cover; user-select: none; pointer-events: none; max-width: none; }
         .canvas-frame .txt-layer { position: absolute; user-select: none; pointer-events: none; overflow: hidden; overflow-wrap: break-word; box-sizing: border-box; }
 
@@ -381,14 +381,9 @@ The team is a collective of high-end fashion designers from the luxury industry 
 
         function updateCanvasScale() {
             const w = window.innerWidth, h = window.innerHeight;
-            // Cover mode (fill viewport, crop the overflow) when the screen is wider than the 16:9 design
-            // — covers mobile landscape, ultrawide, etc.
-            // Fit mode (preserves all content, may letterbox) on screens narrower than 16:9 (4:3, 16:10).
-            const designRatio = DESIGN_W / DESIGN_H;
-            const viewportRatio = w / h;
-            const scale = viewportRatio >= designRatio
-                ? Math.max(w / DESIGN_W, h / DESIGN_H)
-                : Math.min(w / DESIGN_W, h / DESIGN_H);
+            // Always contain (fit) so the full 16:9 composition is visible on every screen.
+            // Slide backgrounds (black/white) fill the letterbox margin so it looks intentional.
+            const scale = Math.min(w / DESIGN_W, h / DESIGN_H);
             document.documentElement.style.setProperty('--canvas-scale', scale.toFixed(4));
         }
         updateCanvasScale();
