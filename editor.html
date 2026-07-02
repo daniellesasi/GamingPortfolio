@@ -36,6 +36,10 @@ body { font-family:system-ui,sans-serif; background:#5a5a5a; color:#fff; height:
 .sc:hover { border-color:#888; transform:scale(1.015); }
 .sc.dragging { opacity:.3; cursor:grabbing; transform:none; }
 .sc.drag-over { border-color:#00cc66; border-style:dashed; transform:none; }
+.sc.hidden-sec { opacity:.45; }
+.sc .sec-hide-btn { padding:3px 9px; background:#555; border:1px solid #666; border-radius:4px; font-size:.6rem; color:#bbb; cursor:pointer; white-space:nowrap; flex-shrink:0; }
+.sc .sec-hide-btn:hover { border-color:#aaa; color:#fff; }
+.sc.hidden-sec .sec-hide-btn { background:#4a3000; border-color:#6a4a00; color:#ffd060; }
 .sc .order-badge { position:absolute; top:7px; left:8px; background:rgba(0,0,0,.65); padding:2px 7px; border-radius:9px; font-size:.6rem; color:#fff; z-index:2; pointer-events:none; }
 .sc .prev { height:150px; background:#3a3a3a; position:relative; overflow:hidden; }
 .sc .prev img,.sc .prev video { width:100%; height:100%; object-fit:cover; pointer-events:none; }
@@ -236,12 +240,13 @@ body { font-family:system-ui,sans-serif; background:#5a5a5a; color:#fff; height:
 <script>
 console.log('🔧 Editor v2026-05-05-source-safe loaded');
 const REPO='daniellesasi/Portfolio', BRANCH='main', BASE='https://daniellesasi.github.io/Portfolio/';
-const PORTS=['a1','a2'], NB=8;
+const PORTS=['a1','a2'], NB=12;
 
 let token='', idxSha='', idxHTML='';
 // sections[id] = [ { layers:[ {id,type,src,preview,b64,filename,x,y,w,h,rot,z,fit} ] } ]
 let sections={};
 let sectionOrder={}; // { portIdx: ['a1b1','a1b2',...] }
+let sectionHidden={}; // { 'a1b9': true, ... } — section-level draft/hidden state
 let activeSec=null, activeSlide=0, selId=null;
 let drag=null; // {type:'move'|'resize'|'rotate', handle, sx,sy, ox,oy,ow,oh,orot}
 let autoSaveTimer=null;
@@ -288,6 +293,7 @@ async function load(){
 function parseHTML(){
   sections={};
   sectionOrder={};
+  sectionHidden={};
   const doc=new DOMParser().parseFromString(idxHTML,'text/html');
   PORTS.forEach((port,pi)=>{
     // Read actual gallery order from the HTML (preserves user's reorder)
@@ -299,6 +305,7 @@ function parseHTML(){
 
     for(let b=1;b<=NB;b++){
       const id=`${port}b${b}`, sec=doc.getElementById(id), slides=[];
+      sectionHidden[id] = sec ? sec.classList.contains('draft') : false;
       if(sec){
         // New structure: .canvas-frame elements
         sec.querySelectorAll('.canvas-frame').forEach(frame=>{
@@ -375,7 +382,8 @@ function renderGrid(){
     order.forEach((id,pos)=>{
       const slides=sections[id]||[];
       const first=slides[0]?.layers?.find(l=>l.src||l.preview);
-      const el=document.createElement('div'); el.className='sc'; el.dataset.id=id;
+      const isHidden = !!sectionHidden[id];
+      const el=document.createElement('div'); el.className='sc'+(isHidden?' hidden-sec':''); el.dataset.id=id;
       const src=first?(first.preview||BASE+first.src):'';
       const tag=first?.type||'img';
       const prev=src?`<${tag} src="${src}" ${tag==='video'?'muted autoplay loop playsinline':''}></${tag}>` :'';
@@ -383,7 +391,7 @@ function renderGrid(){
       const draftCount=slides.filter(s=>s.draft).length;
       const draftNote=draftCount?` · ${draftCount} draft`:'';
       const origB=id.match(/b(\d+)/)[1];
-      el.innerHTML=`<span class="order-badge">${pos+1}</span><div class="prev">${prev}<span class="badge">${slides.length} slide${slides.length!==1?'s':''}${draftNote} · ${count} layer${count!==1?'s':''}</span></div><div class="foot"><span class="lbl">Gallery ${origB}</span><span class="hint">Drag to reorder · Click to edit →</span></div>`;
+      el.innerHTML=`<span class="order-badge">${pos+1}</span><div class="prev">${prev}<span class="badge">${slides.length} slide${slides.length!==1?'s':''}${draftNote} · ${count} layer${count!==1?'s':''}</span></div><div class="foot"><span class="lbl">Gallery ${origB}</span><button class="sec-hide-btn" onclick="toggleSectionHidden(event,'${id}')">${isHidden?'Show':'Hide'}</button></div>`;
       // click to edit (only if not dragging)
       el.onclick=e=>{ if(!e.defaultPrevented) openEditor(id); };
       // drag-to-reorder
@@ -410,6 +418,14 @@ function renderGrid(){
     });
   });
 }
+function toggleSectionHidden(e, id){
+  e.stopPropagation();
+  e.preventDefault();
+  sectionHidden[id] = !sectionHidden[id];
+  renderGrid();
+  queuePush();
+}
+
 function switchTab(i){
   document.querySelectorAll('.tab').forEach((t,ti)=>t.classList.toggle('active',ti===i));
   $('sg0').style.display=i===0?'':'none'; $('sg1').style.display=i===1?'':'none';
@@ -965,7 +981,15 @@ function buildHTML(){
       `$1\n                    ${galContent}$2`
     );
   });
-  // 2. Reorder sections + nav for each portfolio
+  // 2. Update section-level hidden (draft) class on each <section> element
+  Object.keys(sectionHidden).forEach(id=>{
+    const hidden=!!sectionHidden[id];
+    html=html.replace(
+      new RegExp(`(<section[^>]*?id="${id}"[^>]*?class="project-section)(\\s+draft)?(")`),
+      (_,pre,_d,q)=>`${pre}${hidden?' draft':''}${q}`
+    );
+  });
+  // 3. Reorder sections + nav for each portfolio
   [0,1].forEach(pi=>{ html=reorderPortHTML(html,pi); });
   return html;
 }
@@ -994,13 +1018,14 @@ function reorderPortHTML(html, pi){
   const reorderedMain = leading + order.map(id=>secMap[id]||'').join('');
   html = html.slice(0, mainTagEnd) + reorderedMain + html.slice(mainClose);
 
-  // -- reorder nav <a> links to match new section order --
+  // -- reorder nav <a> links to match new section order (hidden sections excluded) --
   const navOpen = html.indexOf('<nav', portPos);
   const navClose = html.indexOf('</nav>', navOpen);
   if(navOpen===-1||navClose===-1) return html;
   const navTagEnd = html.indexOf('>', navOpen)+1;
-  // rebuild nav links: label is position, href is section id
-  const newNav = order.map((id,i)=>`<a href="#${id}">${i+1}</a>`).join('');
+  // rebuild nav links: only visible sections get a numbered link
+  const visibleOrder = order.filter(id=>!sectionHidden[id]);
+  const newNav = visibleOrder.map((id,i)=>`<a href="#${id}">${i+1}</a>`).join('');
   html = html.slice(0, navTagEnd) + newNav + html.slice(navClose);
 
   return html;
