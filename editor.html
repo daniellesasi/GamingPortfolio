@@ -276,14 +276,14 @@ document.addEventListener('visibilitychange', () => {
 const $ = id => document.getElementById(id);
 const tok = () => { token=$('tok').value.trim()||localStorage.getItem('gh_t')||''; $('tok').value=token; if(token)localStorage.setItem('gh_t',token); return token; };
 const st = (m,c='') => { $('st').textContent=m; $('st').className=c; };
-const gh = (p,o={}) => { const {headers:xh={},...rest}=o; return fetch(`https://api.github.com/repos/${REPO}/contents/${p}`,{...rest,cache:'no-store',headers:{Authorization:`token ${tok()}`,Accept:'application/vnd.github.v3+json','If-None-Match':'',...xh}}); };
+const gh = (p,o={}) => { const {headers:xh={},...rest}=o; return fetch(`https://api.github.com/repos/${REPO}/contents/${p}`,{...rest,cache:'no-store',headers:{Authorization:`Bearer ${tok()}`,Accept:'application/vnd.github.v3+json','If-None-Match':'',...xh}}); };
 
 // ── LOAD ─────────────────────────────────────────────────────────────────────
 async function load(){
   if(!tok()){st('Enter token','er');return;}
   st('Loading…');
   try{
-    const r=await gh('index.html'); if(!r.ok)throw new Error(r.status===401?'Invalid token':'Fetch failed');
+    const r=await gh('index.html'); if(!r.ok)throw new Error(r.status===401?'Invalid token — check repo scope':r.status===404?'Repo not found (404) — check your token has repo scope':`GitHub API error ${r.status}`);
     const d=await r.json(); idxSha=d.sha;
     idxHTML=decodeURIComponent(escape(atob(d.content.replace(/\n/g,''))));
     parseHTML(); renderGrid(); $('saveBtn').disabled=false; st('Loaded ✓','ok');
