@@ -212,6 +212,13 @@ body { font-family:system-ui,sans-serif; background:#5a5a5a; color:#fff; height:
             <button class="tp-tog" id="mp-shadow" onclick="toggleShadow()" title="Soft drop shadow (auto: black on white bg, white on black bg)">Shadow</button>
             <button class="tp-tog" id="mp-lock" onclick="toggleLock()" title="Lock so it can't be dragged">🔒</button>
           </div>
+          <div id="mp-format-row" style="display:none">
+            <label>File format</label>
+            <div class="tp-row">
+              <button class="tp-tog" id="mp-fmt-png" onclick="setMediaFormat('png')">PNG</button>
+              <button class="tp-tog" id="mp-fmt-jpg" onclick="setMediaFormat('jpg')">JPEG</button>
+            </div>
+          </div>
         </div>
       </div>
       <div id="canvas-wrap">
@@ -241,6 +248,13 @@ body { font-family:system-ui,sans-serif; background:#5a5a5a; color:#fff; height:
 console.log('🔧 Editor v2026-05-05-source-safe loaded');
 const REPO='daniellesasi/GamingPortfolio', BRANCH='main', BASE='https://daniellesasi.github.io/GamingPortfolio/';
 const PORTS=['a1','a2'], NB=12;
+
+// Basenames (no extension) that have both a .png and a .jpg version uploaded to the repo.
+// PNGs with real transparency were intentionally left PNG-only (JPEG can't hold alpha),
+// so only opaque images get a format choice here. Grows at runtime as new opaque PNGs are added.
+const JPEG_TWINS = new Set(["a1b10c1","a1b10c10","a1b10c11","a1b10c12","a1b10c13","a1b10c14","a1b10c2","a1b10c3","a1b10c4","a1b10c5","a1b10c6","a1b10c7","a1b10c8","a1b10c9","a1b11c1","a1b11c2","a1b11c3","a1b11c4","a1b11c5","a1b11c6","a1b12c1","a1b12c2","a1b12c3","a1b12c4","a1b12c5","a1b12c6","a1b12c7","a1b1c10","a1b1c11","a1b1c12","a1b1c17","a1b1c19","a1b1c6","a1b1c8","a1b2c17","a1b2c18","a1b2c20","a1b3c14","a1b3c17","a1b3c5","a1b3c6","a1b4c11","a1b4c12","a1b4c14","a1b4c17","a1b4c19","a1b4c20","a1b4c3","a1b4c37","a1b4c38","a1b4c8","a1b4c9","a1b5c1","a1b5c19","a1b5c2","a1b5c20","a1b5c21","a1b5c22","a1b6c10","a1b6c4","a1b6c6","a1b6c8","a1b7c10","a1b7c12","a1b7c13","a1b7c15","a1b7c17","a1b7c18","a1b7c21","a1b7c22","a1b7c23","a1b7c24","a1b7c25","a1b7c6","a1b7c7","a1b8c11","a1b8c12","a1b8c13","a1b9c1","a1b9c10","a1b9c11","a1b9c12","a1b9c13","a1b9c14","a1b9c15","a1b9c2","a1b9c3","a1b9c4","a1b9c5","a1b9c6","a1b9c7","a1b9c8","a1b9c9"]);
+const baseName = f => (f||'').replace(/^.*\//,'').replace(/\.[^.]+$/,'');
+const extOf = f => ((f||'').match(/\.([^.]+)$/)||[,''])[1].toLowerCase();
 
 let token='', idxSha='', idxHTML='';
 // sections[id] = [ { layers:[ {id,type,src,preview,b64,filename,x,y,w,h,rot,z,fit} ] } ]
@@ -610,6 +624,58 @@ function syncMediaProps(layer){
   $('mp-br-val').textContent=layer.borderRadius||0;
   $('mp-lock').classList.toggle('on',!!layer.locked);
   $('mp-shadow').classList.toggle('on',!!layer.shadow);
+  // Format toggle: only offer it once the file is actually saved (has a real src,
+  // no pending upload) and a same-name .jpg twin exists — transparent PNGs never
+  // get a twin, so they simply won't show this control.
+  const file=layer.filename||layer.src||'';
+  const ext=extOf(file), base=baseName(file);
+  const showFmt = layer.type==='img' && !layer.b64 && (ext==='png'||ext==='jpg'||ext==='jpeg') && JPEG_TWINS.has(base);
+  $('mp-format-row').style.display = showFmt ? '' : 'none';
+  if(showFmt){
+    const isJpg = ext==='jpg'||ext==='jpeg';
+    $('mp-fmt-png').classList.toggle('on', !isJpg);
+    $('mp-fmt-jpg').classList.toggle('on', isJpg);
+  }
+}
+
+function setMediaFormat(fmt){
+  const layer=getLayer(selId); if(!layer||layer.type!=='img'||layer.b64)return;
+  const file=layer.filename||layer.src; if(!file)return;
+  const base=baseName(file);
+  if(!JPEG_TWINS.has(base))return;
+  const newFile=`${base}.${fmt==='jpg'?'jpg':'png'}`;
+  layer.src=newFile;
+  if(layer.filename) layer.filename=newFile;
+  showSlide(activeSlide); renderLayers(); syncMediaProps(layer); queuePush();
+}
+
+// Given a data: URL for a freshly-dropped PNG, check whether every pixel is fully
+// opaque. If so, produce a JPEG twin (transparency can't survive JPEG, so images
+// that actually use it are left PNG-only, same rule as the bulk conversion).
+function detectOpaqueAndMakeJpeg(dataURL, quality=0.9){
+  return new Promise(resolve=>{
+    const img=new Image();
+    img.onload=()=>{
+      const canvas=document.createElement('canvas');
+      canvas.width=img.naturalWidth; canvas.height=img.naturalHeight;
+      const ctx=canvas.getContext('2d');
+      ctx.drawImage(img,0,0);
+      let opaque=true;
+      try{
+        const data=ctx.getImageData(0,0,canvas.width,canvas.height).data;
+        for(let i=3;i<data.length;i+=4){ if(data[i]<255){opaque=false;break;} }
+      }catch(e){ opaque=false; }
+      if(!opaque){ resolve({opaque:false}); return; }
+      canvas.toBlob(blob=>{
+        if(!blob){resolve({opaque:true,jpegB64:null});return;}
+        const r=new FileReader();
+        r.onload=()=>resolve({opaque:true,jpegB64:r.result.split(',')[1]});
+        r.readAsDataURL(blob);
+      },'image/jpeg',quality);
+    };
+    img.onerror=()=>resolve({opaque:false});
+    img.src=dataURL;
+  });
 }
 
 function updateMediaProp(prop, val){
@@ -743,6 +809,16 @@ function addFilesToSlide(files){
       selectLayerById(layer.id);
       st(`${fname} added — uploading…`,'');
       queuePush();
+      if(!isVid && ext==='png'){
+        detectOpaqueAndMakeJpeg(ev.target.result).then(({opaque,jpegB64})=>{
+          if(opaque && jpegB64){
+            layer.b64_twin=jpegB64;
+            layer.filename_twin=baseName(fname)+'.jpg';
+            JPEG_TWINS.add(baseName(fname));
+            queuePush();
+          }
+        });
+      }
     };
     reader.readAsDataURL(file);
   });
@@ -886,8 +962,12 @@ async function saveAll(){
   if(isSaving){st('⏳ Already saving — will retry…','warn'); return;}
   isSaving=true;
   $('saveBtn').disabled=true;
-  // Collect all layers with b64 (newly added files)
-  const uploads=[]; Object.values(sections).forEach(slides=>slides.forEach(sl=>sl.layers.forEach(l=>{if(l.b64)uploads.push(l);})));
+  // Collect all layers with b64 (newly added files), plus any pending JPEG twins
+  // generated client-side for freshly-added opaque PNGs.
+  const uploads=[]; Object.values(sections).forEach(slides=>slides.forEach(sl=>sl.layers.forEach(l=>{
+    if(l.b64)uploads.push(l);
+    if(l.b64_twin && l.filename_twin) uploads.push({filename:l.filename_twin,b64:l.b64_twin,_twin:true,_parent:l});
+  })));
   console.log(`saveAll: ${uploads.length} file(s) to upload`, uploads.map(l=>l.filename));
   let done=0;
   for(const l of uploads){
@@ -917,7 +997,8 @@ async function saveAll(){
         $('saveBtn').disabled=false; return;
       }
       console.log(`Uploaded: ${l.filename}`);
-      l.src=l.filename; delete l.b64;
+      if(l._twin && l._parent){ delete l._parent.b64_twin; delete l._parent.filename_twin; }
+      else { l.src=l.filename; delete l.b64; }
     }catch(e){
       console.error('Upload error:', e);
       alert(`Upload error for ${l.filename}:\n${e.message}`);
