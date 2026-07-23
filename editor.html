@@ -256,6 +256,11 @@ const JPEG_TWINS = new Set(["a1b10c1","a1b10c10","a1b10c11","a1b10c12","a1b10c13
 const baseName = f => (f||'').replace(/^.*\//,'').replace(/\.[^.]+$/,'');
 const extOf = f => ((f||'').match(/\.([^.]+)$/)||[,''])[1].toLowerCase();
 
+// When opened from a local server or file:// (i.e. not the real GitHub Pages host),
+// "saving" is a no-op — lets you click around (including the format toggle) without
+// pushing anything to the live repo. Loading is still a real (read-only) GitHub fetch.
+const PREVIEW_MODE = location.hostname!=='daniellesasi.github.io';
+
 let token='', idxSha='', idxHTML='';
 // sections[id] = [ { layers:[ {id,type,src,preview,b64,filename,x,y,w,h,rot,z,fit} ] } ]
 let sections={};
@@ -957,6 +962,12 @@ function addToolsCaptionToAll(){
 
 // ── SAVE ─────────────────────────────────────────────────────────────────────
 async function saveAll(){
+  if(PREVIEW_MODE){
+    unsaved=false; clearTimeout(autoSaveTimer);
+    st('🧪 Preview mode — not pushed to GitHub','warn');
+    renderGrid();
+    return;
+  }
   if(!tok()){alert('No GitHub token — enter your token and click Load first.');return;}
   if(!idxSha){alert('Editor not loaded — click Load first.');return;}
   if(isSaving){st('⏳ Already saving — will retry…','warn'); return;}
@@ -1149,7 +1160,10 @@ function toggleCanvasBg(){
 }
 
 window.addEventListener('resize',()=>{ positionCanvas(); if(selId){const l=getLayer(selId);if(l)updateSelBox(l);} });
-window.onload=()=>{ const t=localStorage.getItem('gh_t'); if(t)$('tok').value=t; };
+window.onload=()=>{
+  const t=localStorage.getItem('gh_t'); if(t)$('tok').value=t;
+  if(PREVIEW_MODE){ $('saveBtn').textContent='Push to GitHub (preview — disabled)'; st('🧪 Preview mode — Load is real, saving is a no-op',''); }
+};
 </script>
 </body>
 </html>
